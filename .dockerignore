@@ -1,0 +1,22 @@
+node_modules
+dist
+coverage
+.git
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
+README.md
+HANDOFF.md
+LICENSE
+*.log
+.DS_Store
+config.example.json
+docs
+# Datos del censo y configuración local: nunca en el contexto de build.
+data
+*.csv
+*.txt
+*.db
+/config.json
+/logo.svg

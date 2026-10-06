@@ -1,0 +1,47 @@
+# Despliegue completo: microservicio del censo + web.
+# Sólo el servicio "web" publica puerto; el microservicio queda en la red interna.
+#
+#   cp config.example.json config.json && cp public/logo.svg logo.svg
+#   mkdir -p data && cp /ruta/al/censo.txt data/
+#   TOKEN=$(openssl rand -hex 32) docker compose up -d --build
+#
+# La carpeta ./data debe poder escribirla el UID 1000 (el microservicio crea la
+# base de datos y borra el CSV tras importarlo).
+
+services:
+  censo:
+    image: harbor.videoatencion.com/library/censo-electoral:latest
+    build: https://github.com/videoatencion/consulta-censo-electoral.git
+    restart: unless-stopped
+    environment:
+      TOKEN: ${TOKEN:?Defina la variable de entorno TOKEN}
+      TIMEZONE: Europe/Madrid
+      # Campos de desempate indexados (ajústelos a su municipio):
+      DOCUMENT_CHARS: "5"
+      DAY: "true"
+      YEAR: "true"
+      FN: "true"
+      SN1: "true"
+      SN2: "true"
+      POST_CODE: "true"
+    volumes:
+      - ./data:/data
+
+  web:
+    build: .
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://censo:8080
+      BACKEND_TOKEN: ${TOKEN:?Defina la variable de entorno TOKEN}
+      RATE_LIMIT: 30r/m
+      RATE_BURST: "20"
+      # Obligatorio detrás de un balanceador o ingress (su rango):
+      # REAL_IP_FROM: 10.0.0.0/8
+    volumes:
+      # Configuración y logotipo del ente, sin recompilar la imagen:
+      - ./config.json:/usr/share/nginx/html/config.json:ro
+      - ./logo.svg:/usr/share/nginx/html/logo.svg:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      - censo

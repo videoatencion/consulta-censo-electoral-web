@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+
+# Test / coverage
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Local config overrides (el config.json real es munta al contenidor)
+config.local.json
+
+# Datos del censo (personales): nunca en el repositorio.
+data/
+*.csv
+*.db
+censo*.txt
+
+# Configuración y logotipo del ente para docker compose (se copian de los ejemplos)
+/config.json
+/logo.svg

@@ -1,0 +1,12 @@
+{
+  "entityName": "Ajuntament d'Exemple",
+  "logoUrl": "./logo.svg",
+  "logoAlt": "Escut de l'Ajuntament d'Exemple",
+  "contactPhone": "+34 93 000 00 00",
+  "contactEmail": "eleccions@exemple.cat",
+  "incidentsUrl": "https://seu.exemple.cat/tramit/reclamacio-cens",
+  "electionName": "Eleccions municipals 2027",
+  "apiBaseUrl": "/api",
+  "defaultLanguage": "ca",
+  "primaryColor": "#8a1538"
+}

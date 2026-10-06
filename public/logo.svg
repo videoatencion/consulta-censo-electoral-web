@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 76" role="img" aria-label="Escut genèric">
+  <path d="M32 2 60 12v26c0 18-12 29-28 36C16 67 4 56 4 38V12Z" fill="#8a1538"/>
+  <path d="M32 8 54 16.4v21.8c0 14.4-9.4 23.3-22 29.4-12.6-6.1-22-15-22-29.4V16.4Z" fill="#f7c948"/>
+  <rect x="15" y="18" width="5.5" height="40" fill="#8a1538"/>
+  <rect x="24.25" y="18" width="5.5" height="40" fill="#8a1538"/>
+  <rect x="33.5" y="18" width="5.5" height="40" fill="#8a1538"/>
+  <rect x="42.75" y="18" width="5.5" height="40" fill="#8a1538"/>
+  <circle cx="32" cy="13.5" r="3.2" fill="#8a1538"/>
+</svg>
