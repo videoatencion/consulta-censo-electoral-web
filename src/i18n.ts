@@ -1,3 +1,14 @@
+/**
+ * Diccionaris de la interfície.
+ *
+ * Per afegir un idioma nou (p. ex. «gl»):
+ *   1. Afegeix el codi a LANGUAGES i el nom natiu a LANGUAGE_NAMES.
+ *   2. Crea el diccionari amb el tipus `Messages`: TypeScript obliga a
+ *      traduir TOTES les claus (no en pot faltar cap).
+ *   3. Afegeix-lo a `dictionaries`.
+ * La resta surt sola: isLanguage, el selector d'idioma i la validació de
+ * `languages`/`defaultLanguage` del config.json deriven de LANGUAGES.
+ */
 export const LANGUAGES = ['ca', 'es'] as const
 export type Language = (typeof LANGUAGES)[number]
 
@@ -9,19 +20,27 @@ export const LANGUAGE_NAMES: Record<Language, string> = {
 const ca = {
   skipToContent: 'Salta al contingut principal',
   languageSelectorLabel: 'Idioma',
-  pageTitle: 'Consulta on has d’anar a votar',
+  pageTitle: 'Consulteu on heu d’anar a votar',
   logoAltDefault: (entityName: string) => `Logotip: ${entityName}`,
 
   docLabel: 'DNI o NIE',
   docHelp:
     'Escriviu el document amb la lletra. També s’admeten passaports i documents de ciutadans de la UE.',
   docPlaceholder: 'p. ex. 12345678Z',
+  docLabelLast: (n: number) => `Últims ${n} caràcters del DNI o NIE, amb la lletra`,
+  docLabelFirst: (n: number) => `Primeres ${n} xifres del DNI o NIE`,
+  docLabelFirstLetter: (n: number) => `Primeres ${n} xifres i la lletra del DNI o NIE`,
+  docHelpReduced: (example: string) =>
+    `Per exemple, si el vostre DNI és 12345678Z, escriviu ${example}. També podeu escriure’l sencer: només s’enviaran aquests caràcters.`,
+  docPlaceholderReduced: (example: string) => `p. ex. ${example}`,
   submit: 'Consulta',
   loading: 'S’està consultant, espereu…',
   errorDocInvalidLetter:
     'La lletra de control no correspon al número del document. Reviseu-lo i torneu-ho a provar.',
   errorDocInvalidFormat:
     'El format del document no és vàlid. Escriviu un DNI, un NIE o un altre document de 5 a 20 caràcters.',
+  errorDocInvalidFormatReduced:
+    'El format del document no és vàlid. Escriviu la part del document que us demanem o el document sencer amb la lletra.',
 
   documentReadonlyLabel: 'Document',
   changeDocument: 'Canvia el document',
@@ -108,19 +127,27 @@ export type Messages = typeof ca
 const es: Messages = {
   skipToContent: 'Saltar al contenido principal',
   languageSelectorLabel: 'Idioma',
-  pageTitle: 'Consulta dónde tienes que ir a votar',
+  pageTitle: 'Consulte dónde tiene que ir a votar',
   logoAltDefault: (entityName: string) => `Logotipo de ${entityName}`,
 
   docLabel: 'DNI o NIE',
   docHelp:
     'Escriba el documento con la letra. También se admiten pasaportes y documentos de ciudadanos de la UE.',
   docPlaceholder: 'p. ej. 12345678Z',
+  docLabelLast: (n: number) => `Últimos ${n} caracteres del DNI o NIE, con la letra`,
+  docLabelFirst: (n: number) => `Primeras ${n} cifras del DNI o NIE`,
+  docLabelFirstLetter: (n: number) => `Primeras ${n} cifras y la letra del DNI o NIE`,
+  docHelpReduced: (example: string) =>
+    `Por ejemplo, si su DNI es 12345678Z, escriba ${example}. También puede escribirlo entero: sólo se enviarán estos caracteres.`,
+  docPlaceholderReduced: (example: string) => `p. ej. ${example}`,
   submit: 'Consultar',
   loading: 'Consultando, espere…',
   errorDocInvalidLetter:
     'La letra de control no corresponde al número del documento. Revíselo e inténtelo de nuevo.',
   errorDocInvalidFormat:
     'El formato del documento no es válido. Escriba un DNI, un NIE u otro documento de 5 a 20 caracteres.',
+  errorDocInvalidFormatReduced:
+    'El formato del documento no es válido. Escriba la parte del documento que se indica o el documento entero con la letra.',
 
   documentReadonlyLabel: 'Documento',
   changeDocument: 'Cambiar el documento',
@@ -205,5 +232,5 @@ const es: Messages = {
 export const dictionaries: Record<Language, Messages> = { ca, es }
 
 export function isLanguage(value: unknown): value is Language {
-  return value === 'ca' || value === 'es'
+  return typeof value === 'string' && (LANGUAGES as readonly string[]).includes(value)
 }

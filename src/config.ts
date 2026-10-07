@@ -1,4 +1,4 @@
-import { isLanguage, type Language } from './i18n'
+import { isLanguage, LANGUAGES, type Language } from './i18n'
 
 /**
  * Càrrega i validació en runtime de public/config.json. Sense llibreries:
@@ -6,15 +6,20 @@ import { isLanguage, type Language } from './i18n'
  * una pantalla d'error de configuració en lloc d'arriscar-se a funcionar malament.
  */
 
+/** Un text vàlid per a tots els idiomes, o un text per idioma (claus de `languages`). */
+export type LocalizedText = string | Partial<Record<Language, string>>
+
 export interface AppConfig {
-  entityName: string
+  entityName: LocalizedText
   logoUrl: string
-  logoAlt?: string
+  logoAlt?: LocalizedText
   contactPhone?: string
   contactEmail?: string
   incidentsUrl?: string
-  electionName?: string
+  electionName?: LocalizedText
   apiBaseUrl: string
+  /** Idiomes que ofereix la web, en l'ordre del selector. Amb un sol idioma no es mostra el selector. */
+  languages: Language[]
   defaultLanguage: Language
   primaryColor?: string
 }
@@ -22,6 +27,19 @@ export interface AppConfig {
 export type ConfigResult =
   | { ok: true; config: AppConfig }
   | { ok: false; errors: string[] }
+
+/**
+ * Resol un LocalizedText a l'idioma actiu; si falta, al defaultLanguage;
+ * si tampoc, al primer disponible de l'objecte.
+ */
+export function resolveText(
+  text: LocalizedText,
+  language: Language,
+  defaultLanguage: Language,
+): string {
+  if (typeof text === 'string') return text
+  return text[language] ?? text[defaultLanguage] ?? Object.values(text)[0] ?? ''
+}
 
 /** Accepta només URLs relatives o https: (rebutja javascript:, data:, http:...). */
 export function isSafeUrl(value: string): boolean {
@@ -71,6 +89,76 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
 }
 
+/**
+ * Valida un camp de text traduïble: o bé un text (vàlid per a tots els
+ * idiomes) o bé un objecte {idioma: text} amb claus dins de `languages`.
+ * Els camps opcionals retornen undefined si no hi són; un objecte buit també
+ * compta com a absent per als opcionals, però és error per als obligatoris.
+ */
+function parseLocalizedText(
+  value: unknown,
+  field: string,
+  languages: Language[],
+  required: boolean,
+  errors: string[],
+): LocalizedText | undefined {
+  if (value === undefined || value === null) {
+    if (required) errors.push(`Falta el camp obligatori "${field}"`)
+    return undefined
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (trimmed !== '') return trimmed
+    if (required) errors.push(`Falta el camp obligatori "${field}"`)
+    return undefined
+  }
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    const entries = Object.entries(value as Record<string, unknown>)
+    if (entries.length === 0) {
+      if (required) errors.push(`"${field}" ha de tenir almenys una traducció`)
+      return undefined
+    }
+    const result: Partial<Record<Language, string>> = {}
+    for (const [key, text] of entries) {
+      if (!isLanguage(key) || !languages.includes(key)) {
+        errors.push(`"${field}" té una clau d'idioma que no és a "languages": "${key}"`)
+        continue
+      }
+      const trimmed = optionalString(text)
+      if (!trimmed) {
+        errors.push(`"${field}" té el text buit per a l'idioma "${key}"`)
+        continue
+      }
+      result[key] = trimmed
+    }
+    return Object.keys(result).length > 0 ? result : undefined
+  }
+  errors.push(`"${field}" ha de ser un text o un objecte per idioma`)
+  return undefined
+}
+
+/** Valida la llista d'idiomes: no buida, tots coneguts i sense duplicats. */
+function parseLanguages(value: unknown, errors: string[]): Language[] {
+  if (value === undefined) return [...LANGUAGES]
+  if (!Array.isArray(value) || value.length === 0) {
+    errors.push('"languages" ha de ser una llista no buida d\'idiomes')
+    return [...LANGUAGES]
+  }
+  const seen = new Set<Language>()
+  const result: Language[] = []
+  for (const item of value) {
+    if (!isLanguage(item)) {
+      errors.push(`"languages" conté un idioma no suportat: ${JSON.stringify(item)}`)
+    } else if (seen.has(item)) {
+      errors.push(`"languages" conté l'idioma duplicat "${item}"`)
+    } else {
+      seen.add(item)
+      result.push(item)
+    }
+  }
+  return result.length > 0 ? result : [...LANGUAGES]
+}
+
 export function validateConfig(raw: unknown): ConfigResult {
   const errors: string[] = []
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
@@ -78,8 +166,18 @@ export function validateConfig(raw: unknown): ConfigResult {
   }
   const obj = raw as Record<string, unknown>
 
-  const entityName = optionalString(obj.entityName)
-  if (!entityName) errors.push('Falta el camp obligatori "entityName"')
+  const languages = parseLanguages(obj.languages, errors)
+
+  let defaultLanguage: Language = languages[0]
+  if (obj.defaultLanguage !== undefined) {
+    if (!isLanguage(obj.defaultLanguage) || !languages.includes(obj.defaultLanguage)) {
+      errors.push('"defaultLanguage" ha de ser un dels idiomes de "languages"')
+    } else {
+      defaultLanguage = obj.defaultLanguage
+    }
+  }
+
+  const entityName = parseLocalizedText(obj.entityName, 'entityName', languages, true, errors)
 
   const logoUrl = optionalString(obj.logoUrl)
   if (!logoUrl) {
@@ -98,11 +196,6 @@ export function validateConfig(raw: unknown): ConfigResult {
     errors.push('"apiBaseUrl" ha de ser un camí relatiu al servidor (p. ex. "/api")')
   }
 
-  const defaultLanguage: Language = isLanguage(obj.defaultLanguage) ? obj.defaultLanguage : 'ca'
-  if (obj.defaultLanguage !== undefined && !isLanguage(obj.defaultLanguage)) {
-    errors.push('"defaultLanguage" ha de ser "ca" o "es"')
-  }
-
   let primaryColor = optionalString(obj.primaryColor)
   if (primaryColor) {
     if (!parseHexColor(primaryColor)) {
@@ -117,19 +210,23 @@ export function validateConfig(raw: unknown): ConfigResult {
     }
   }
 
+  const logoAlt = parseLocalizedText(obj.logoAlt, 'logoAlt', languages, false, errors)
+  const electionName = parseLocalizedText(obj.electionName, 'electionName', languages, false, errors)
+
   if (errors.length > 0) return { ok: false, errors }
 
   return {
     ok: true,
     config: {
-      entityName: entityName as string,
+      entityName: entityName as LocalizedText,
       logoUrl: logoUrl as string,
-      logoAlt: optionalString(obj.logoAlt),
+      logoAlt,
       contactPhone: optionalString(obj.contactPhone),
       contactEmail: optionalString(obj.contactEmail),
       incidentsUrl,
-      electionName: optionalString(obj.electionName),
+      electionName,
       apiBaseUrl,
+      languages,
       defaultLanguage,
       primaryColor,
     },

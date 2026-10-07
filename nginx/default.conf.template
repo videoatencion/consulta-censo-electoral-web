@@ -12,6 +12,10 @@ real_ip_recursive on;
 
 limit_req_zone $binary_remote_addr zone=consulta:10m rate=${RATE_LIMIT};
 
+# Zona pròpia per a /api/formato (es demana un cop per càrrega de pàgina):
+# generosa per no gastar la quota de les consultes.
+limit_req_zone $binary_remote_addr zone=formato:10m rate=60r/m;
+
 server {
     listen 8080;
     server_name _;
@@ -32,6 +36,24 @@ server {
         client_max_body_size 4k;
 
         proxy_pass ${BACKEND_URL}/consulta;
+        proxy_http_version 1.1;
+        proxy_set_header Authorization "${BACKEND_TOKEN}";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 15s;
+    }
+
+    # Format del document indexat: només GET, amb el mateix token injectat.
+    location = /api/formato {
+        limit_except GET { deny all; }
+
+        limit_req zone=formato burst=30 nodelay;
+        limit_req_status 429;
+
+        proxy_pass ${BACKEND_URL}/formato;
         proxy_http_version 1.1;
         proxy_set_header Authorization "${BACKEND_TOKEN}";
         proxy_set_header Host $host;

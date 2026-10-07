@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { consulta, type ConsultaPayload, type PollingStation, type UserField } from './api'
-import { loadConfig, type AppConfig } from './config'
+import { loadConfig, resolveText, type AppConfig } from './config'
+import {
+  loadFormato,
+  normalizeForIndex,
+  reduceDocument,
+  reducedMaxLength,
+  type DocumentFormat,
+} from './formato'
 import { dictionaries, isLanguage, type Language } from './i18n'
 import { checkDocument } from './validateDoc'
 import { Header } from './components/Header'
@@ -22,7 +29,7 @@ type Screen =
   | 'error'
   | 'too-many-attempts'
 
-type Phase = 'loading-config' | 'config-error' | 'ready'
+type Phase = 'loading-config' | 'config-error' | 'formato-error' | 'ready'
 
 const MAX_ATTEMPTS = 5
 const INACTIVITY_MS = 5 * 60 * 1000
@@ -37,10 +44,11 @@ function firstRemainingField(
   return fields.find((f) => answered[f] === undefined && !dismissed.includes(f)) ?? null
 }
 
-function readStoredLanguage(): Language | null {
+/** L'idioma desat només s'aplica si la configuració actual l'ofereix. */
+function readStoredLanguage(languages: Language[]): Language | null {
   try {
     const stored = window.localStorage.getItem(LANGUAGE_STORAGE_KEY)
-    return isLanguage(stored) ? stored : null
+    return isLanguage(stored) && languages.includes(stored) ? stored : null
   } catch {
     return null
   }
@@ -58,10 +66,12 @@ export default function App() {
   const [phase, setPhase] = useState<Phase>('loading-config')
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [configErrors, setConfigErrors] = useState<string[]>([])
+  const [format, setFormat] = useState<DocumentFormat | null>(null)
   const [language, setLanguage] = useState<Language>('ca')
 
   const [screen, setScreen] = useState<Screen>('form')
   const [submitting, setSubmitting] = useState(false)
+  const [docInput, setDocInput] = useState('')
   const [document_, setDocument] = useState('')
   const [docError, setDocError] = useState<string | null>(null)
   const [requestedFields, setRequestedFields] = useState<UserField[]>([])
@@ -81,18 +91,27 @@ export default function App() {
 
   const t = dictionaries[language]
 
-  // Carrega de la configuració en temps d'execució.
+  // Carrega de la configuració en temps d'execució i, a continuació, del
+  // format del document que indexa el backend. Si el format no es pot obtenir
+  // NO s'assumeix el document sencer: es mostra un error amb reintent.
   useEffect(() => {
     let cancelled = false
-    void loadConfig().then((result) => {
+    void loadConfig().then(async (result) => {
       if (cancelled) return
-      if (result.ok) {
-        setConfig(result.config)
-        setLanguage(readStoredLanguage() ?? result.config.defaultLanguage)
-        setPhase('ready')
-      } else {
+      if (!result.ok) {
         setConfigErrors(result.errors)
         setPhase('config-error')
+        return
+      }
+      setConfig(result.config)
+      setLanguage(readStoredLanguage(result.config.languages) ?? result.config.defaultLanguage)
+      const formato = await loadFormato(result.config.apiBaseUrl)
+      if (cancelled) return
+      if (formato) {
+        setFormat(formato)
+        setPhase('ready')
+      } else {
+        setPhase('formato-error')
       }
     })
     return () => {
@@ -100,10 +119,27 @@ export default function App() {
     }
   }, [])
 
-  // Idioma del document i títol de la pàgina.
+  // Reintenta només la càrrega del format (la configuració ja és bona).
+  const retryFormato = useCallback(() => {
+    if (!config) return
+    setPhase('loading-config')
+    void loadFormato(config.apiBaseUrl).then((formato) => {
+      if (formato) {
+        setFormat(formato)
+        setPhase('ready')
+      } else {
+        setPhase('formato-error')
+      }
+    })
+  }, [config])
+
+  // Idioma del document i títol de la pàgina (amb l'entityName de l'idioma actiu).
   useEffect(() => {
     document.documentElement.lang = language
-    if (config) document.title = `${t.pageTitle} — ${config.entityName}`
+    if (config) {
+      const entityName = resolveText(config.entityName, language, config.defaultLanguage)
+      document.title = `${t.pageTitle} — ${entityName}`
+    }
   }, [language, config, t])
 
   // Color corporatiu (via CSSOM, permès per la CSP sense unsafe-inline).
@@ -119,6 +155,7 @@ export default function App() {
   }, [screen, phase])
 
   const resetAll = useCallback((newNotice: string | null = null) => {
+    setDocInput('')
     setDocument('')
     setDocError(null)
     setRequestedFields([])
@@ -138,7 +175,7 @@ export default function App() {
 
   // Temporitzador d'inactivitat (quioscs públics): a qualsevol pantalla que
   // contingui dades personals, no només al resultat.
-  const holdsPersonalData = document_ !== '' || station !== null
+  const holdsPersonalData = docInput !== '' || document_ !== '' || station !== null
   useEffect(() => {
     if (!holdsPersonalData) return
     let timer = window.setTimeout(onIdle, INACTIVITY_MS)
@@ -222,16 +259,58 @@ export default function App() {
   )
 
   function handleDocSubmit(raw: string) {
-    if (!config) return
-    const trimmed = raw.trim()
-    const check = checkDocument(trimmed)
-    if (!check.ok) {
-      setDocError(check.reason === 'letter' ? t.errorDocInvalidLetter : t.errorDocInvalidFormat)
-      return
+    if (!config || !format) return
+    const n = format.documentChars
+    let citizenId: string
+
+    if (n === 0) {
+      // El backend indexa el document sencer: validació completa com sempre.
+      const check = checkDocument(raw.trim())
+      if (!check.ok) {
+        setDocError(check.reason === 'letter' ? t.errorDocInvalidLetter : t.errorDocInvalidFormat)
+        return
+      }
+      citizenId = check.normalized
+    } else {
+      const normalized = normalizeForIndex(raw)
+      const maxLen = reducedMaxLength(format)
+      if (normalized === '') {
+        setDocError(t.errorDocInvalidFormatReduced)
+        return
+      }
+      const fullShape = /^\d{8}[A-Z]$/.test(normalized) || /^[XYZ]\d{7}[A-Z]$/.test(normalized)
+      if (fullShape) {
+        // Document sencer: es valida la lletra de control i es retalla abans d'enviar.
+        const check = checkDocument(normalized)
+        if (!check.ok) {
+          setDocError(
+            check.reason === 'letter' ? t.errorDocInvalidLetter : t.errorDocInvalidFormat,
+          )
+          return
+        }
+        citizenId = reduceDocument(normalized, format)
+      } else if (normalized.length === maxLen) {
+        // Ja té la longitud exacta de la part indexada (amb la lletra, si el
+        // format la inclou): s'envia tal qual (la lletra no es pot validar;
+        // és acceptable). Una longitud diferent NO s'accepta tal qual.
+        citizenId = normalized
+      } else if (normalized.length > maxLen && /^[A-Z0-9]{5,20}$/.test(normalized)) {
+        // Un altre document més llarg (passaport...): es retalla amb les
+        // mateixes regles. Més curt que la part indexada no pot ser: error.
+        citizenId = reduceDocument(normalized, format)
+      } else {
+        setDocError(t.errorDocInvalidFormatReduced)
+        return
+      }
+      if (citizenId === '' || citizenId.length > maxLen) {
+        setDocError(t.errorDocInvalidFormatReduced)
+        return
+      }
     }
+
     setDocError(null)
     setNotice(null)
-    setDocument(trimmed)
+    setDocument(citizenId)
     setAttempts(1)
     setRequestedFields([])
     setAnswered({})
@@ -240,7 +319,7 @@ export default function App() {
     setDraft('')
     setFieldError(null)
     setFormError(null)
-    const payload: ConsultaPayload = { citizenId: trimmed }
+    const payload: ConsultaPayload = { citizenId }
     lastPayloadRef.current = payload
     void runConsulta(config, payload, false, {}, [])
   }
@@ -373,14 +452,37 @@ export default function App() {
     )
   }
 
+  if (phase === 'formato-error') {
+    // El format del document no s'ha pogut obtenir: no es consulta amb el
+    // document sencer com a alternativa, es demana reintentar.
+    return (
+      <main className="app-config-error" id="main">
+        <h1>{t.genericErrorTitle}</h1>
+        <p>{t.genericErrorText}</p>
+        <div className="actions">
+          <button type="button" className="button button-primary" onClick={retryFormato}>
+            {t.retry}
+          </button>
+        </div>
+      </main>
+    )
+  }
+
   const cfg = config as AppConfig
+  const fmt = format as DocumentFormat
 
   return (
     <div className="app-shell">
       <a href="#main" className="skip-link">
         {t.skipToContent}
       </a>
-      <Header config={cfg} t={t} language={language} onLanguageChange={handleLanguageChange} />
+      <Header
+        config={cfg}
+        t={t}
+        language={language}
+        languages={cfg.languages}
+        onLanguageChange={handleLanguageChange}
+      />
 
       <main id="main" tabIndex={-1} className="app-main">
         <div className="visually-hidden" role="status" aria-live="polite">
@@ -391,8 +493,9 @@ export default function App() {
           <DocForm
             t={t}
             headingRef={headingRef}
-            value={document_}
-            onChange={setDocument}
+            format={fmt}
+            value={docInput}
+            onChange={setDocInput}
             error={docError}
             submitting={submitting}
             notice={notice}

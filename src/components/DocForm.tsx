@@ -1,9 +1,11 @@
 import { useId, type FormEvent, type RefObject } from 'react'
+import { docFieldTexts, type DocumentFormat } from '../formato'
 import type { Messages } from '../i18n'
 
 interface DocFormProps {
   t: Messages
   headingRef: RefObject<HTMLHeadingElement | null>
+  format: DocumentFormat
   value: string
   onChange: (value: string) => void
   error: string | null
@@ -12,11 +14,12 @@ interface DocFormProps {
   onSubmit: (raw: string) => void
 }
 
-/** Pantalla inicial: un sol camp, el document d'identitat. */
-export function DocForm({ t, headingRef, value, onChange, error, submitting, notice, onSubmit }: DocFormProps) {
+/** Pantalla inicial: un sol camp, la part del document que indexa el backend. */
+export function DocForm({ t, headingRef, format, value, onChange, error, submitting, notice, onSubmit }: DocFormProps) {
   const id = useId()
   const errorId = `${id}-error`
   const helpId = `${id}-help`
+  const texts = docFieldTexts(t, format)
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault()
@@ -37,14 +40,15 @@ export function DocForm({ t, headingRef, value, onChange, error, submitting, not
 
       <form onSubmit={handleSubmit} noValidate>
         <div className="field">
-          <label htmlFor={id}>{t.docLabel}</label>
+          <label htmlFor={id}>{texts.label}</label>
           <input
             id={id}
             name="citizenId"
             type="text"
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            placeholder={t.docPlaceholder}
+            placeholder={texts.placeholder}
+            maxLength={20}
             autoComplete="off"
             spellCheck={false}
             inputMode="text"
@@ -54,7 +58,7 @@ export function DocForm({ t, headingRef, value, onChange, error, submitting, not
             disabled={submitting}
           />
           <p id={helpId} className="field-help">
-            {t.docHelp}
+            {texts.help}
           </p>
           {error && (
             <p id={errorId} className="field-error" role="alert">

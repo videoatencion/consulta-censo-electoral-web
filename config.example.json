@@ -5,8 +5,12 @@
   "contactPhone": "+34 93 000 00 00",
   "contactEmail": "eleccions@exemple.cat",
   "incidentsUrl": "https://seu.exemple.cat/tramit/reclamacio-cens",
-  "electionName": "Eleccions municipals 2027",
-  "apiBaseUrl": "/api",
+  "electionName": {
+    "ca": "Eleccions municipals 2027",
+    "es": "Elecciones municipales 2027"
+  },
+  "languages": ["ca", "es"],
   "defaultLanguage": "ca",
+  "apiBaseUrl": "/api",
   "primaryColor": "#8a1538"
 }

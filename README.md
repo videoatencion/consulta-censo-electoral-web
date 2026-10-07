@@ -18,7 +18,7 @@ TOKEN=$(openssl rand -hex 32) docker compose up -d --build
 ```
 y abra http://localhost:8080.
 
-1. El ciudadano escribe su DNI o NIE. La web comprueba la letra de control antes de enviarlo, para detectar errores de tecleo. También se aceptan pasaportes y documentos de ciudadanos de la UE (CERE).
+1. El ciudadano escribe **sólo la parte del documento que el microservicio indexa** (por defecto, los últimos 5 caracteres del DNI o NIE con la letra). Si lo escribe entero, la web comprueba la letra de control para detectar errores de tecleo y lo recorta antes de enviarlo: **el documento completo no sale nunca del navegador**. También se aceptan pasaportes y documentos de ciudadanos de la UE (CERE), que se recortan con la misma regla.
 2. Si el documento basta, se muestra el colegio electoral.
 3. Si varias personas comparten los datos indexados, el microservicio devuelve los campos que las distinguen, **ordenados de más a menos útil**. La web pregunta **sólo uno cada vez**: el que mejor desempata. Si el ciudadano no lo sabe («No lo sé»), pasa al siguiente. Con cada respuesta se vuelve a consultar, hasta que se determina la mesa.
 4. Si no se encuentra al ciudadano o no se puede desempatar, se muestra el teléfono y el correo de ayuda y el enlace al trámite de reclamación del censo de la sede electrónica.
@@ -32,11 +32,15 @@ Navegador ──► web (nginx) ────────────────
               · sirve la web y el config.json      · no se expone a Internet
               · añade el TOKEN (Authorization)
               · límite de peticiones por IP (429)
-              · sólo POST /api/consulta
+              · sólo POST /api/consulta y GET /api/formato
               · CSP estricta y cabeceras de seguridad
 ```
 
 El microservicio exige un `TOKEN`. Un token dentro de una web lo podría leer cualquiera, así que **el token nunca llega al navegador**: la web llama a `/api/consulta` sin autenticación y es nginx quien añade la cabecera `Authorization` al reenviar la petición al microservicio. Por eso sólo debe publicarse el servicio `web`.
+
+### Sólo se envía la parte indexada del documento
+
+El microservicio indexa sólo una parte del documento (por defecto los últimos 5 caracteres, configurable con `DOCUMENT_CHARS`, `FIRST_CHARS` y `FIRST_CHARS_ADD_LETTER`). Al cargarse, la web le pide ese formato (`GET /formato`, que responde p. ej. `{"documentChars":5,"firstChars":false,"addLetter":false}`) y adapta el formulario: etiqueta, ayuda con un ejemplo y validación. Si el ciudadano escribe el documento entero, la web lo recorta con **exactamente la misma regla que el backend** antes de enviarlo. Y si `/formato` no responde, la web muestra un error con reintento: nunca envía el documento entero como alternativa.
 
 ## Empezando
 
@@ -44,7 +48,14 @@ El microservicio exige un `TOKEN`. Un token dentro de una web lo podría leer cu
 
 2) Cree `config.json` a partir de `config.example.json` con los datos de su ente (vea [Configuración](#configuración)) y ponga su logotipo en `logo.svg`, o indique en `logoUrl` una URL `https:`.
 
-3) Revise los campos de desempate del servicio `censo` en [`docker-compose.yml`](docker-compose.yml). Para un municipio grande, `DOCUMENT_CHARS=5` (valor por defecto) con `DAY`, `YEAR`, `SN1`, `SN2` y `POST_CODE` suele ser suficiente. Si la importación detecta colisiones, active más campos en lugar de aumentar `DOCUMENT_CHARS`.
+3) **Analice el censo para indexar sólo la información mínima necesaria.** El microservicio propone las configuraciones mínimas que no producen colisiones en *su* censo, sin importarlo ni borrarlo (la carpeta se monta en sólo lectura):
+
+```shell
+docker compose build censo
+docker run --rm -v "$PWD/data:/data:ro" harbor.videoatencion.com/library/censo-electoral:latest analizar
+```
+
+  Copie las variables de la opción elegida (por ejemplo `DOCUMENT_CHARS=5 DAY=true SN1=true POST_CODE=true NAME_CHARS=1`) en el apartado `environment` del servicio `censo` de [`docker-compose.yml`](docker-compose.yml), y quite las que no use. Vea en el [README del microservicio](https://github.com/videoatencion/consulta-censo-electoral#empezando) cómo leer el informe. La web se entera del formato elegido (`DOCUMENT_CHARS`, `FIRST_CHARS`, `FIRST_CHARS_ADD_LETTER`) preguntando al microservicio: no hay que configurar nada más.
 
 4) Levante la web y el microservicio:
 
@@ -74,24 +85,43 @@ La web lee `config.json` al cargarse, de modo que se puede cambiar sin recompila
   "contactPhone": "+34 93 000 00 00",
   "contactEmail": "eleccions@exemple.cat",
   "incidentsUrl": "https://seu.exemple.cat/tramit/reclamacio-cens",
-  "electionName": "Eleccions municipals 2027"
+  "electionName": {
+    "ca": "Eleccions municipals 2027",
+    "es": "Elecciones municipales 2027"
+  },
+  "languages": ["ca", "es"]
 }
 ```
 
 | Campo             | Obligatorio | Por defecto              | Descripción |
 | ----------------- | ----------- | ------------------------ | ----------- |
-| `entityName`      | sí          |                          | Nombre del ente, en la cabecera. |
+| `entityName`      | sí          |                          | Nombre del ente, en la cabecera. Texto u objeto por idioma (vea [Idiomas](#idiomas)). |
 | `logoUrl`         | sí          |                          | Logotipo: ruta local (`./logo.svg`) o URL `https:`. |
-| `logoAlt`         | no          | `Logotip: {entityName}`  | Texto alternativo del logotipo. |
+| `logoAlt`         | no          | `Logotip: {entityName}`  | Texto alternativo del logotipo. Texto u objeto por idioma. |
 | `contactPhone`    | no          |                          | Teléfono de ayuda. |
 | `contactEmail`    | no          |                          | Correo de ayuda. |
 | `incidentsUrl`    | no          |                          | Enlace al trámite de la sede electrónica para reclamar incidencias en el censo (relativo o `https:`). |
-| `electionName`    | no          |                          | Subtítulo con la convocatoria. |
-| `defaultLanguage` | no          | `ca`                     | `ca` o `es`. El ciudadano puede cambiarlo. |
+| `electionName`    | no          |                          | Subtítulo con la convocatoria. Texto u objeto por idioma. |
+| `languages`       | no          | `["ca", "es"]`           | Idiomas que ofrece la web, en orden. Con uno solo no se muestra el selector. |
+| `defaultLanguage` | no          | el primero de `languages` | Idioma inicial. Debe estar en `languages`. El ciudadano puede cambiarlo. |
 | `primaryColor`    | no          | `#005694`                | Color corporativo. Si no tiene contraste suficiente con el blanco (4,5:1) se ignora. |
 | `apiBaseUrl`      | no          | `/api`                   | Ruta de la API, si se publica bajo otro camino. |
 
 Si falta un campo obligatorio o un valor no es seguro (por ejemplo una URL `javascript:`), la web muestra una pantalla de error de configuración con el motivo.
+
+### Idiomas
+
+La web puede ser **mono o multi-idioma**, según `languages`:
+
+- **`["es"]` (u otro idioma único)**: no se muestra el selector de idioma y toda la interfície sale en ese idioma. Hay un ejemplo completo para un municipio sólo en castellano en [`config.example.es.json`](config.example.es.json).
+- **`["ca", "es"]`**: se muestra el selector y el ciudadano puede cambiar; la elección se guarda en el navegador (y se ignora si ya no está en `languages`).
+
+Los textos propios del ente (`entityName`, `electionName` y `logoAlt`) admiten dos formas:
+
+- **un texto**: `"electionName": "Elecciones municipales 2027"` — se muestra igual en todos los idiomas;
+- **un objeto por idioma**: `"electionName": {"ca": "Eleccions municipals 2027", "es": "Elecciones municipales 2027"}` — se muestra el del idioma activo; si falta, el del `defaultLanguage`; si también falta, el primero disponible. Las claves deben ser idiomas de `languages`, si no la configuración da error.
+
+**Añadir un idioma nuevo** (p. ej. gallego o euskera) requiere tocar el código una sola vez: en [`src/i18n.ts`](src/i18n.ts) se añade el código a `LANGUAGES`, el nombre a `LANGUAGE_NAMES` y un diccionario más. El tipo `Messages` obliga a traducir todas las claves, de modo que no puede quedar ninguna cadena sin traducir. Después basta con incluir el código en `languages`.
 
 ## Ejecutando en producción
 
@@ -112,6 +142,7 @@ Variables de entorno del servicio `web`:
 
 ## Privacidad
 
+- **El documento completo no sale nunca del navegador**: sólo se envía la parte que el microservicio indexa (p. ej. los últimos 5 caracteres). Si el ciudadano lo escribe entero, la web lo recorta antes de enviarlo.
 - No se guarda ningún dato en el navegador, salvo el idioma elegido. No hay analítica ni se carga nada de terceros (sólo el logotipo, si `logoUrl` es remota).
 - El documento no aparece nunca en la URL. nginx no registra el cuerpo de las peticiones.
 - Tras 5 minutos sin actividad en cualquier pantalla con datos, la web vuelve al inicio y los borra (pensado para quioscos y pantallas públicas). «Nueva consulta» también los borra.
@@ -135,7 +166,11 @@ Con `npm run dev`, Vite reenvía `/api` al microservicio y le añade el token, i
 BACKEND_URL=http://localhost:8080 BACKEND_TOKEN=el-token npm run dev
 ```
 
-Documentos del modo `dev:mock`: `12345678Z` se encuentra directamente, `00000000T` pide desempatar por `[day sn1]`, `X1234567L` no se puede desempatar (`[colele]`), y cualquier otro no se encuentra.
+Documentos del modo `dev:mock` (valen escritos enteros o ya recortados): `12345678Z` o `5678Z` se encuentra directamente, `00000000T` o `0000T` pide desempatar por `[day sn1]`, `X1234567L` o `4567L` no se puede desempatar (`[colele]`), y cualquier otro no se encuentra. El formato que sirve `GET /api/formato` en el mock es el por defecto (últimos 5 caracteres) y se puede cambiar para probar los otros modos:
+
+```shell
+VITE_MOCK_FORMAT='{"documentChars":5,"firstChars":true,"addLetter":true}' npm run dev:mock
+```
 
 Antes de enviar cambios: `npm run lint && npm test && npm run build`.
 
@@ -163,7 +198,7 @@ TOKEN=$(openssl rand -hex 32) docker compose up -d --build
 ```
 and open http://localhost:8080.
 
-1. The citizen types their DNI or NIE. The check letter is validated before sending it, to catch typos. Passports and EU citizens' documents (CERE) are accepted too.
+1. The citizen types **only the part of the document the microservice indexes** (by default, the last 5 characters of the DNI or NIE with the letter). If they type it in full, the check letter is validated to catch typos and the app trims it before sending: **the full document never leaves the browser**. Passports and EU citizens' documents (CERE) are accepted too, trimmed with the same rule.
 2. If the document is enough, the polling station is shown.
 3. If several people share the indexed data, the microservice returns the fields that tell them apart, **ordered from most to least useful**. The web app asks **only one at a time**: the one that best breaks the tie. If the citizen does not know it ("I don't know"), it moves to the next one. Each answer triggers a new lookup until the table is found.
 4. If the citizen is not found or the tie cannot be broken, the help phone, email and the link to the census complaint procedure are shown.
@@ -175,11 +210,13 @@ Browser ──► web (nginx) ────────────────�
             · serves the app and config.json      · not exposed to the Internet
             · adds the TOKEN (Authorization)
             · per-IP rate limiting (429)
-            · only POST /api/consulta
+            · only POST /api/consulta and GET /api/formato
             · strict CSP and security headers
 ```
 
 The microservice requires a `TOKEN`. Any token inside a web app can be read by anyone, so **the token never reaches the browser**: the app calls `/api/consulta` unauthenticated and nginx adds the `Authorization` header when forwarding the request. Only the `web` service must be published.
+
+On startup the app asks the microservice for the indexed document format (`GET /formato`, answering e.g. `{"documentChars":5,"firstChars":false,"addLetter":false}`, derived from its `DOCUMENT_CHARS`, `FIRST_CHARS` and `FIRST_CHARS_ADD_LETTER` settings) and adapts the form to it. If `/formato` fails, the app shows an error with a retry button — it never falls back to sending the full document.
 
 ## Getting started
 
@@ -187,7 +224,16 @@ The microservice requires a `TOKEN`. Any token inside a web app can be read by a
 
 2) Create `config.json` from `config.example.json` with your entity's details (see the table in the Spanish section) and put your logo in `logo.svg`, or set `logoUrl` to an `https:` URL.
 
-3) Review the tie-breaking fields of the `censo` service in [`docker-compose.yml`](docker-compose.yml). For a large municipality, `DOCUMENT_CHARS=5` (default) with `DAY`, `YEAR`, `SN1`, `SN2` and `POST_CODE` is usually enough. If the import reports collisions, enable more fields rather than raising `DOCUMENT_CHARS`.
+The site can be **mono- or multilingual**: `languages` (default `["ca", "es"]`) lists the languages offered, in order, and with a single language the selector is not shown — see [`config.example.es.json`](config.example.es.json) for a Spanish-only municipality. `defaultLanguage` (default: the first of `languages`) must be one of them. The entity texts `entityName`, `electionName` and `logoAlt` accept either a plain string (shown in every language) or a per-language object such as `{"ca": "Eleccions municipals 2027", "es": "Elecciones municipales 2027"}`, falling back to `defaultLanguage` when a translation is missing. Adding a new language (e.g. Galician) is a one-time code change in [`src/i18n.ts`](src/i18n.ts): add the code to `LANGUAGES`, its name to `LANGUAGE_NAMES` and one more dictionary — the `Messages` type forces every key to be translated.
+
+3) **Analyze the census to index only the minimum information needed.** The microservice proposes the minimal configurations that produce no collisions in *your* census, without importing or deleting it (the folder is mounted read-only):
+
+```shell
+docker compose build censo
+docker run --rm -v "$PWD/data:/data:ro" harbor.videoatencion.com/library/censo-electoral:latest analizar
+```
+
+  Copy the variables of the chosen option into the `environment` of the `censo` service in [`docker-compose.yml`](docker-compose.yml) and remove the ones you do not use. See the [microservice README](https://github.com/videoatencion/consulta-censo-electoral#getting-started) on how to read the report.
 
 4) Start the web app and the microservice:
 
@@ -214,6 +260,8 @@ npm ci
 npm run dev:mock   # no microservice, fictitious data
 BACKEND_URL=http://localhost:8080 BACKEND_TOKEN=the-token npm run dev
 ```
+
+The mock accepts the documents whole or already trimmed: `12345678Z` or `5678Z` is found, `00000000T` or `0000T` asks for `[day sn1]`, `X1234567L` or `4567L` cannot be resolved (`[colele]`), anything else is not found. Its `GET /api/formato` answer can be changed with `VITE_MOCK_FORMAT` (see the Spanish section).
 
 Before submitting changes: `npm run lint && npm test && npm run build`.
 

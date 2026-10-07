@@ -16,8 +16,13 @@ services:
     environment:
       TOKEN: ${TOKEN:?Defina la variable de entorno TOKEN}
       TIMEZONE: Europe/Madrid
-      # Campos de desempate indexados (ajústelos a su municipio):
+      # Campos indexados: sustitúyalos por la opción mínima que proponga
+      #   docker run --rm -v "$PWD/data:/data:ro" harbor.videoatencion.com/library/censo-electoral:latest analizar
+      # Parte del documento indexada (por defecto: últimos 5 caracteres con la
+      # letra). La web lee este formato del propio microservicio (GET /formato).
       DOCUMENT_CHARS: "5"
+      # FIRST_CHARS: "true"             # primeros N caracteres en vez de los últimos
+      # FIRST_CHARS_ADD_LETTER: "true"  # con FIRST_CHARS: primeros N + la letra
       DAY: "true"
       YEAR: "true"
       FN: "true"

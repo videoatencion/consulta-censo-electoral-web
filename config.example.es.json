@@ -1,0 +1,12 @@
+{
+  "entityName": "Ayuntamiento de Ejemplo",
+  "logoUrl": "./logo.svg",
+  "logoAlt": "Escudo del Ayuntamiento de Ejemplo",
+  "contactPhone": "+34 93 000 00 00",
+  "contactEmail": "elecciones@ejemplo.es",
+  "incidentsUrl": "https://sede.ejemplo.es/tramite/reclamacion-censo",
+  "electionName": "Elecciones municipales 2027",
+  "languages": ["es"],
+  "apiBaseUrl": "/api",
+  "primaryColor": "#8a1538"
+}
